@@ -14,6 +14,7 @@ from simple_mpc_server.tools.file_system_tool import FileSystemTool
 from simple_mpc_server.tools.monster_tool import MonsterTool
 from simple_mpc_server.tools.thinker_tool import ThinkerTool
 from simple_mpc_server.tools.arduino_tool import ArduinoTool
+from simple_mpc_server.tools.robot_tool import RobotTool
 
 # Create an MCP server
 mcp = FastMCP("ArduinoMcpServer")
@@ -23,6 +24,7 @@ FileSystemTool().register(mcp)
 MonsterTool().register(mcp)
 ThinkerTool().register(mcp)
 ArduinoTool().register(mcp)
+RobotTool().register(mcp)
 
 if __name__ == "__main__":
     # Equivalent to app.Run("http://localhost:4444")
