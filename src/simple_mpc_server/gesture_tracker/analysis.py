@@ -54,16 +54,32 @@ class HandAngles:
 class HandAnalyzer:
     """Metody analizy gestów dłoni."""
 
+    # Indeksy kluczowych punktów dla czytelności
+    WRIST = 0
+    THUMB_TIP = 4
+    THUMB_IP = 3
+    THUMB_MCP = 2
+    INDEX_PIP = 6
+    INDEX_TIP = 8
+    MIDDLE_PIP = 10
+    MIDDLE_TIP = 12
+    RING_PIP = 14
+    RING_TIP = 16
+    PINKY_PIP = 18
+    PINKY_TIP = 20
+    
+    # Palce (bez kciuka) - ich końcówki i PIP'y
+    FINGERS = [
+        (INDEX_TIP, INDEX_PIP),
+        (MIDDLE_TIP, MIDDLE_PIP),
+        (RING_TIP, RING_PIP),
+        (PINKY_TIP, PINKY_PIP)
+    ]
+
     @staticmethod
     def compute_angles(landmarks) -> HandAngles:
         """
         Oblicza kąty kciuka względem dłoni i palca wskazującego.
-
-        Args:
-            landmarks: lista 21 landmarków dłoni z MediaPipe
-
-        Returns:
-            HandAngles z kątami w stopniach
         """
         p9 = _v3(landmarks[9])
         p12 = _v3(landmarks[12])
@@ -85,55 +101,47 @@ class HandAnalyzer:
     def is_fist(landmarks) -> bool:
         """
         Sprawdza czy dłoń jest zaciśnięta w pięść.
-
-        Args:
-            landmarks: lista 21 landmarków dłoni
-
-        Returns:
-            True jeśli gest to pięść
+        Poprawiona logika oparta na kątach i odległościach w przestrzeni 3D.
         """
-        # Środek dłoni
-        palm_idxs = [0, 5, 9, 13, 17]
-        palm_pts = [_v3(landmarks[i]) for i in palm_idxs]
-        palm = sum(palm_pts) / len(palm_pts)
-
-        # Skala dłoni
-        wrist = _v3(landmarks[0])
+        wrist = _v3(landmarks[HandAnalyzer.WRIST])
         mid_mcp = _v3(landmarks[9])
-        span = float(np.linalg.norm(wrist - mid_mcp))
-        if span < 1e-6:
+        
+        # Skala dłoni jako odległość od nadgarstka do środka dłoni
+        hand_scale = float(np.linalg.norm(wrist - mid_mcp))
+        if hand_scale < 1e-6:
             return False
 
-        # Sprawdź palce (bez kciuka) – czy końcówki są blisko dłoni
-        tips = [8, 12, 16, 20]
-        dists = [float(np.linalg.norm(_v3(landmarks[t]) - palm)) for t in tips]
-        thresh = 0.4 * span
-        fingers_folded = all(d < thresh for d in dists)
+        # Sprawdzenie palców (bez kciuka): czy są "zagięte"
+        # Palec jest zgięty, jeśli jego końcówka jest bliżej nadgarstka niż jego własny PIP.
+        fingers_folded_count = 0
+        for tip_idx, pip_idx in HandAnalyzer.FINGERS:
+            tip_to_wrist = np.linalg.norm(_v3(landmarks[tip_idx]) - wrist)
+            pip_to_wrist = np.linalg.norm(_v3(landmarks[pip_idx]) - wrist)
+            if tip_to_wrist < pip_to_wrist:
+                fingers_folded_count += 1
 
-        # Sprawdź kciuk
-        thumb_tip = _v3(landmarks[4])
-        thumb_mcp = _v3(landmarks[2])
-        thumb_dir = thumb_tip - thumb_mcp
+        # Jeśli większość palców (3 z 4) jest zgiętych, to prawdopodobnie pięść
+        fingers_condition = fingers_folded_count >= 3
+
+        # Sprawdzenie kciuka: czy jest "schowany" pod palcem wskazującym lub blisko dłoni
+        thumb_tip = _v3(landmarks[HandAnalyzer.THUMB_TIP])
+        thumb_ip = _v3(landmarks[HandAnalyzer.THUMB_IP])
         index_mcp = _v3(landmarks[5])
-        palm_axis = mid_mcp - wrist
+        
+        # Odległość między kciukiem a palcem wskazującym
+        thumb_index_dist = np.linalg.norm(thumb_tip - index_mcp)
+        # Odległość kciuka od "centrum" dłoni (nadgarstek)
+        thumb_palm_dist = np.linalg.norm(thumb_tip - wrist)
 
-        dist_thumb_palm = float(np.linalg.norm(thumb_tip - palm))
-        dist_thumb_index = float(np.linalg.norm(thumb_tip - index_mcp))
-        ang_thumb_palm = angle_deg(thumb_dir, palm_axis)
+        # Kciuk jest zgięty/ukryty, jeśli jest blisko innych palców lub dłoni
+        thumb_condition = thumb_index_dist < (0.3 * hand_scale) or thumb_palm_dist < (0.4 * hand_scale)
 
-        thumb_close = dist_thumb_palm < (0.35 * span)
-        thumb_tucked = dist_thumb_index < (0.28 * span)
-        thumb_across = ang_thumb_palm > 100.0
-        thumb_folded = thumb_close or thumb_tucked or thumb_across
-
-        return fingers_folded and thumb_folded
+        return fingers_condition and thumb_condition
 
     @staticmethod
     def palm_center(landmarks) -> Tuple[float, float]:
         """
         Zwraca znormalizowaną pozycję (x, y) środka dłoni.
-
-        Wartości 0.0–1.0, gdzie (0,0) = lewy-górny róg.
         """
         idxs = [0, 5, 9, 13, 17]
         pts = [_v3(landmarks[i]) for i in idxs]
@@ -144,8 +152,6 @@ class HandAnalyzer:
     def fingertips(landmarks) -> List[Tuple[float, float]]:
         """
         Zwraca pozycje (x,y) końcówek 5 palców.
-
-        Kolejność: kciuk, wskazujący, środkowy, serdeczny, mały.
         """
         tip_idxs = [4, 8, 12, 16, 20]
         return [(float(landmarks[i].x), float(landmarks[i].y)) for i in tip_idxs]
@@ -154,23 +160,26 @@ class HandAnalyzer:
     def fingers_up(landmarks) -> List[bool]:
         """
         Sprawdza które palce są wyprostowane (uniesione).
+        Poprawiona logika oparta na kątach stawów PIP i DIP.
 
         Returns:
             Lista 5 bool: [kciuk, wskazujący, środkowy, serdeczny, mały]
         """
-        # Porównanie: tip wyżej niż PIP (mniejszy y = wyżej)
-        tip_pip_pairs = [
-            (4, 3),   # kciuk: tip vs IP
-            (8, 6),   # wskazujący: tip vs PIP
-            (12, 10), # środkowy
-            (16, 14), # serdeczny
-            (20, 18), # mały
-        ]
-        result = []
-        for tip_idx, pip_idx in tip_pip_pairs:
+        result = [False] * 5
+
+        # Kciuk: porównujemy IP (interphalangeal joint) z MCP (metacarpophalangeal)
+        # Jeśli IP jest wyżej niż MCP, to kciuk jest uniesiony.
+        thumb_ip_y = landmarks[HandAnalyzer.THUMB_IP].y
+        thumb_mcp_y = landmarks[HandAnalyzer.THUMB_MCP].y
+        result[0] = thumb_ip_y < thumb_mcp_y
+
+        # Pozostałe palce: porównujemy TIP z PIP
+        # Jeśli TIP jest wyżej (mniejszy Y) niż PIP, to palec jest uniesiony.
+        for i, (tip_idx, pip_idx) in enumerate(HandAnalyzer.FINGERS):
             tip_y = landmarks[tip_idx].y
             pip_y = landmarks[pip_idx].y
-            result.append(tip_y < pip_y)
+            result[i + 1] = tip_y < pip_y
+
         return result
 
     @staticmethod

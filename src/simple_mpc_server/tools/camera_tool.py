@@ -132,11 +132,12 @@ class CameraTool(ATool):
                             if hasattr(hand, 'fingers_up') and hand.fingers_up:
                                 fingers_up = [n for n, f in zip(finger_names, hand.fingers_up) if f]
                             
+                            # Cast values to native Python types to avoid numpy scalars
                             reading = {
-                                "timestamp": current_time,
-                                "count": hand.finger_count if hasattr(hand, 'finger_count') else 0,
-                                "is_fist": hand.is_fist if hasattr(hand, 'is_fist') else False,
-                                "up": fingers_up,
+                                "timestamp": float(current_time),
+                                "count": int(hand.finger_count) if hasattr(hand, 'finger_count') else 0,
+                                "is_fist": bool(hand.is_fist) if hasattr(hand, 'is_fist') else False,
+                                "up": list(fingers_up),
                                 # Jeśli tracker ma confidence score dla landmarków, warto to dodać
                                 # "landmark_confidence": hand.confidence 
                             }
@@ -159,16 +160,47 @@ class CameraTool(ATool):
                 if analysis_result['details'].get('active_fingers'):
                     response_msg += f" - Aktywne: {', '.join(analysis_result['details']['active_fingers'])}"
 
-                return json.dumps({
+                # Ensure entire response is JSON serializable (handle numpy scalars, tuples, etc.)
+                try:
+                    import numpy as _np
+                except Exception:
+                    _np = None
+
+                def make_json_safe(obj):
+                    # dict
+                    if isinstance(obj, dict):
+                        return {k: make_json_safe(v) for k, v in obj.items()}
+                    # list or tuple
+                    if isinstance(obj, (list, tuple)):
+                        return [make_json_safe(v) for v in obj]
+                    # numpy scalar
+                    if _np is not None and isinstance(obj, _np.generic):
+                        return obj.item()
+                    # numpy array
+                    if _np is not None and isinstance(obj, _np.ndarray):
+                        return obj.tolist()
+                    # plain bool/int/float/str/None
+                    if isinstance(obj, (str, int, float, bool)) or obj is None:
+                        return obj
+                    # fallback: try to coerce
+                    try:
+                        return str(obj)
+                    except Exception:
+                        return None
+
+                response = {
                     "success": True,
                     "data": {
                         "gesture": analysis_result['gesture'],
-                        "confidence": analysis_result['confidence'],
+                        "confidence": float(analysis_result['confidence']),
                         "details": analysis_result['details'],
-                        "samples_analyzed": len(raw_readings)
+                        "samples_analyzed": int(len(raw_readings))
                     },
                     "description": response_msg
-                }, ensure_ascii=False)
+                }
+
+                safe_response = make_json_safe(response)
+                return json.dumps(safe_response, ensure_ascii=False)
 
             except Exception as e:
                 logger.error(f"Błąd podczas detekcji gestu: {e}", exc_info=True)
