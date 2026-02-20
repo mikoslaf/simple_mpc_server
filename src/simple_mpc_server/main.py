@@ -10,6 +10,7 @@ Or directly:
 
 from loguru import logger
 from mcp.server.fastmcp import FastMCP
+from simple_mpc_server.tools.camera_tool import CameraTool
 from simple_mpc_server.tools.file_system_tool import FileSystemTool
 from simple_mpc_server.tools.monster_tool import MonsterTool
 from simple_mpc_server.tools.thinker_tool import ThinkerTool
@@ -25,6 +26,7 @@ MonsterTool().register(mcp)
 ThinkerTool().register(mcp)
 ArduinoTool().register(mcp)
 RobotTool().register(mcp)
+CameraTool().register(mcp)
 
 if __name__ == "__main__":
     # Equivalent to app.Run("http://localhost:4444")
